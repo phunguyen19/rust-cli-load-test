@@ -1,13 +1,12 @@
 [package]
-name = "cli_load_test"
+name = "benchmark"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-benchmark = { path = "benchmark" }
 tokio = { version = "1.20", features = ["full"] }
-
-[profile.release]
-debug = true
+hyper = { version = "0.14", features = ["full"] }
+async-trait = "0.1.64"
+anyhow = "1.0.59"
