@@ -9,7 +9,7 @@ use hyper::{client::HttpConnector, Client, Uri};
 
 pub struct BenchmarkSettings {
     pub connections: u64,
-    pub requests_per_conn: u64,
+    pub requests: u64,
     pub target_uri: Uri,
 }
 
@@ -58,7 +58,7 @@ struct ConnectionSettings {
 impl ConnectionSettings {
     fn from(value: &BenchmarkSettings) -> Self {
         Self {
-            requests: value.requests_per_conn,
+            requests: value.requests / value.connections,
             target_uri: value.target_uri.clone(),
         }
     }
