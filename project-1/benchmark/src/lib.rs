@@ -147,7 +147,7 @@ mod tests {
 
     #[async_trait]
     impl Requester for MockHttpClient {
-        async fn get(&self, uri: Uri) -> anyhow::Result<u16> {
+        async fn get(&self, _uri: Uri) -> anyhow::Result<u16> {
             match self.status {
                 Some(status) => Ok(status),
                 None => Err(anyhow::Error::msg("Test")),
