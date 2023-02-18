@@ -1,0 +1,22 @@
+[package]
+name = "lp_loadcli_p2_m1_priv"
+version = "0.1.0"
+edition = "2021"
+authors = ["The manning authors"]
+description = "Generates HTTP load against a target Uri"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.20", features = ["full"] }
+anyhow = "1.0.60"
+hyper = { version = "0.14", features = ["full"] }
+lp_loadcli_p2_mock = {version = "*", path="../lp_loadcli_p2_mock"}
+clap = { version = "3.2.16", features = ["derive"] }
+
+[[bin]]
+name = "loadcli_1m2"
+path = "src/main.rs"
+
+[profile.release]
+debug = true
