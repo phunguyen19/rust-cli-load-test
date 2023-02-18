@@ -4,16 +4,13 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    // number of connections
     #[arg(short, long, default_value_t = 512)]
     connections: u64,
 
-    // number of requests sent
     #[arg(short, long, default_value_t = 100_000)]
     requests: u64,
 
-    // output file (for Milestone 3), so the user has the option to save the results somewhere
-    #[arg(short, long, default_value_t = String::from(""))]
+    #[arg(short, long)]
     output_file: String,
 
     #[arg(short, long)]
@@ -35,4 +32,27 @@ async fn main() {
         Ok(summary) => println!("summary: {:?}", summary),
         Err(msg) => println!("error: {:?}", msg),
     }
+}
+
+#[cfg(test)]
+mod test {
+    // test connections
+    // be number
+    // greater than 0
+    // smaller than max u65
+    // is optional with default value
+
+    // test requests
+    // be number
+    // greater than 0
+    // smaller than max u65
+    // greater than connections
+    // is optional with default value
+
+    // test output file
+    // must be provided
+
+    // test target uri
+    // must be provided
+    // must be valid url
 }
