@@ -1,7 +1,7 @@
 use benchmark::BenchmarkSettings;
 
-const CONNECTIONS: u64 = 10;
-const REQUESTS_PER_CONNECTION: u64 = 10;
+const CONNECTIONS: u64 = 512;
+const REQUESTS: u64 = 100_000;
 
 #[tokio::main]
 async fn main() {
@@ -9,7 +9,7 @@ async fn main() {
 
     let result = benchmark::run(BenchmarkSettings {
         connections: CONNECTIONS,
-        requests_per_conn: REQUESTS_PER_CONNECTION,
+        requests: REQUESTS,
         target_uri: benchmark::build_uri(&args[1]),
     })
     .await;
