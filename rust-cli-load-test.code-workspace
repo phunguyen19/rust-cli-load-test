@@ -1,4 +1,22 @@
 {
-  "folders": [],
-  "settings": {}
+	"folders": [
+		{
+			"path": "lp_loadcli_p2_mock"
+		},
+		{
+			"path": "mock-server"
+		},
+		{
+			"path": "project-1"
+		},
+		{
+			"path": "project-1-author-solution"
+		},
+		{
+			"path": "project-2"
+		},
+		{
+			"path": "project-2-ml1-author"
+		}
+	]
 }
