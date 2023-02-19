@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use benchmark::{BenchmarkSettings, Process};
+use benchmark::{BenchmarkSettings, BenchmarkStats};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -40,44 +40,46 @@ fn connection_in_range(s: &str) -> Result<u16, String> {
         ))
 }
 
-struct Bar {
+struct Progress {
     bar: ProgressBar,
 }
 
-impl Process for Bar {
-    fn inc(&self) {
-        self.bar.inc(1);
+impl BenchmarkStats for Progress {
+    fn update(&self, n: u64) {
+        self.bar.inc(n);
     }
 
     fn finish(&self) {
-        self.bar.finish();
+        self.bar.finish_and_clear();
+    }
+}
+
+impl Progress {
+    fn new(len: u64) -> Self {
+        let bar = ProgressBar::new(len);
+        bar.set_style(
+            ProgressStyle::with_template("[{elapsed_precise}] {bar} {pos:>7}/{len:7} {msg}")
+                .unwrap()
+                .progress_chars("##-"),
+        );
+        Self { bar }
     }
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-
-    let bar = ProgressBar::new(args.requests.into());
-    bar.set_style(
-        ProgressStyle::with_template("[{elapsed_precise}] {bar} {pos:>7}/{len:7} {msg}")
-            .unwrap()
-            .progress_chars("##-"),
-    );
-
-    let big_bar = Bar { bar };
-
+    let progress = Progress::new(args.requests.into());
     let result = benchmark::run(
+        progress,
         BenchmarkSettings {
             connections: args.connections,
             requests: args.requests,
             target_uri: benchmark::build_uri(&args.target_uri),
         },
-        big_bar,
-    )
-    .await;
+    );
 
-    match result {
+    match result.await {
         Ok(summary) => println!("summary: {:?}", summary),
         Err(msg) => println!("error: {:?}", msg),
     }

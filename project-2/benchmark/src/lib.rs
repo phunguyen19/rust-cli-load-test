@@ -91,45 +91,45 @@ pub fn build_uri(s: &String) -> Uri {
     Uri::from_str(s).expect("Unparsable target URI")
 }
 
-pub trait Process {
-    /// Increase the process to 1 in total of connections
-    fn inc(&self);
-    // Call finish process
+pub trait BenchmarkStats {
+    fn update(&self, n: u64);
     fn finish(&self);
 }
 
 #[async_trait]
 trait TaskStats {
-    async fn finish_one_request(&self) -> anyhow::Result<()>;
-    async fn finish_all_requests(&self) -> anyhow::Result<()>;
+    async fn update(&self, n: u64) -> ();
+    async fn finish(&self) -> ();
 }
 
 struct TaskNotifier {
-    tx: Sender<u8>,
+    tx: Sender<u64>,
 }
 
 #[async_trait]
 impl TaskStats for TaskNotifier {
-    async fn finish_one_request(&self) -> anyhow::Result<()> {
-        self.tx.send(1).await?;
-        Ok(())
+    async fn update(&self, n: u64) -> () {
+        match self.tx.send(n).await {
+            _ => (),
+        }
     }
 
-    async fn finish_all_requests(&self) -> anyhow::Result<()> {
-        self.tx.send(0).await?;
-        Ok(())
+    async fn finish(&self) -> () {
+        match self.tx.send(0).await {
+            _ => (),
+        }
     }
 }
 
 impl TaskNotifier {
-    pub fn init_channel(buffer: usize) -> (Sender<u8>, Receiver<u8>) {
+    pub fn init_channel(buffer: usize) -> (Sender<u64>, Receiver<u64>) {
         channel(buffer)
     }
 }
 
 pub async fn run(
+    process: impl BenchmarkStats,
     requests_config: BenchmarkSettings,
-    process: impl Process,
 ) -> anyhow::Result<BenchmarkResult> {
     let mut result = BenchmarkResult::new();
     let (tx, mut rx) = TaskNotifier::init_channel(requests_config.connections.into());
@@ -147,13 +147,13 @@ pub async fn run(
 
     let mut count_channel_closed = 0;
     loop {
-        if let Some(i) = rx.recv().await {
-            if i == 0 {
+        if let Some(n) = rx.recv().await {
+            process.update(n);
+            if n == 0 {
                 count_channel_closed += 1;
-            } else {
-                process.inc();
             }
         }
+
         if count_channel_closed >= requests_config.connections {
             break;
         }
@@ -185,16 +185,30 @@ async fn connection_task(
         fail_requests: 0,
     };
 
+    let mut queue_stats = 0;
     for _ in 0..conn_setting.requests {
         match client.get(conn_setting.target_uri.clone()).await? {
             200 => summary.success_requests += 1,
             _ => summary.fail_requests += 1,
         }
         summary.total_requests += 1;
-        stats.finish_one_request().await?;
-    }
 
-    stats.finish_all_requests().await?;
+        // send update stats
+        // just send a batch instead
+        // of send in every completed request
+        queue_stats += 1;
+        if queue_stats >= 99 {
+            stats.update(queue_stats).await;
+            queue_stats = 0;
+        }
+    }
+    // send update stats
+    // send remains in the queue
+    if queue_stats > 0 {
+        stats.update(queue_stats).await;
+    }
+    // notify finished
+    stats.finish().await;
 
     Ok(summary)
 }
@@ -227,11 +241,11 @@ mod tests {
 
     #[async_trait]
     impl TaskStats for MockTaskNotifier {
-        async fn finish_one_request(&self) -> anyhow::Result<()> {
-            Ok(())
+        async fn update(&self, _n: u64) -> () {
+            ()
         }
-        async fn finish_all_requests(&self) -> anyhow::Result<()> {
-            Ok(())
+        async fn finish(&self) -> () {
+            ()
         }
     }
 
