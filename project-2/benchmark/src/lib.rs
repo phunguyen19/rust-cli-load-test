@@ -68,7 +68,15 @@ pub fn build_uri(s: &String) -> Uri {
     Uri::from_str(s).expect("Unparsable target URI")
 }
 
-pub async fn run(requests_config: BenchmarkSettings) -> anyhow::Result<BenchmarkResult> {
+pub trait Process {
+    fn inc(&self);
+    fn finish(&self);
+}
+
+pub async fn run(
+    requests_config: BenchmarkSettings,
+    bar: impl Process,
+) -> anyhow::Result<BenchmarkResult> {
     let mut result = BenchmarkResult {
         total_requests: 0,
         total_time: Duration::new(0, 0),
@@ -95,6 +103,8 @@ pub async fn run(requests_config: BenchmarkSettings) -> anyhow::Result<Benchmark
         if let Some(i) = rx.recv().await {
             if i == 0 {
                 count_channel_closed += 1;
+            } else {
+                bar.inc();
             }
         }
         if count_channel_closed >= requests_config.connections {
@@ -120,6 +130,7 @@ pub async fn run(requests_config: BenchmarkSettings) -> anyhow::Result<Benchmark
     result.success_rate = result.success_requests / result.total_requests;
     result.requests_per_sec = (result.total_requests * 1000) / result.total_time.as_millis() as u64;
 
+    bar.finish();
     Ok(result)
 }
 
