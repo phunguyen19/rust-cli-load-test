@@ -3,9 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Context;
+use anyhow::{Context, Ok};
 use async_trait::async_trait;
 use hyper::{client::HttpConnector, Client, Uri};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub struct BenchmarkSettings {
     pub connections: u16,
@@ -20,6 +21,28 @@ pub struct BenchmarkResult {
     success_requests: u64,
     success_rate: u64,
     requests_per_sec: u64,
+}
+
+impl BenchmarkResult {
+    pub fn new() -> Self {
+        Self {
+            total_requests: 0,
+            total_time: Duration::new(0, 0),
+            success_requests: 0,
+            success_rate: 0,
+            requests_per_sec: 0,
+        }
+    }
+
+    pub fn combine_conn_summaries(&mut self, conn_summaries: &Vec<ConnectionSummary>) {
+        for r in conn_summaries {
+            self.total_requests += r.total_requests;
+            self.success_requests += r.success_requests;
+        }
+
+        self.success_rate = self.success_requests / self.total_requests;
+        self.requests_per_sec = (self.total_requests * 1000) / self.total_time.as_millis() as u64;
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -69,23 +92,47 @@ pub fn build_uri(s: &String) -> Uri {
 }
 
 pub trait Process {
+    /// Increase the process to 1 in total of connections
     fn inc(&self);
+    // Call finish process
     fn finish(&self);
+}
+
+#[async_trait]
+trait TaskStats {
+    async fn finish_one_request(&self) -> anyhow::Result<()>;
+    async fn finish_all_requests(&self) -> anyhow::Result<()>;
+}
+
+struct TaskNotifier {
+    tx: Sender<u8>,
+}
+
+#[async_trait]
+impl TaskStats for TaskNotifier {
+    async fn finish_one_request(&self) -> anyhow::Result<()> {
+        self.tx.send(1).await?;
+        Ok(())
+    }
+
+    async fn finish_all_requests(&self) -> anyhow::Result<()> {
+        self.tx.send(0).await?;
+        Ok(())
+    }
+}
+
+impl TaskNotifier {
+    pub fn init_channel(buffer: usize) -> (Sender<u8>, Receiver<u8>) {
+        channel(buffer)
+    }
 }
 
 pub async fn run(
     requests_config: BenchmarkSettings,
-    bar: impl Process,
+    process: impl Process,
 ) -> anyhow::Result<BenchmarkResult> {
-    let mut result = BenchmarkResult {
-        total_requests: 0,
-        total_time: Duration::new(0, 0),
-        success_requests: 0,
-        success_rate: 0,
-        requests_per_sec: 0,
-    };
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel(requests_config.connections.into());
+    let mut result = BenchmarkResult::new();
+    let (tx, mut rx) = TaskNotifier::init_channel(requests_config.connections.into());
 
     let now = Instant::now();
 
@@ -93,7 +140,7 @@ pub async fn run(
     for _ in 0..requests_config.connections {
         conn_futures.push(tokio::spawn(connection_task(
             HttpClient::new(),
-            tx.clone(),
+            TaskNotifier { tx: tx.clone() },
             ConnectionSettings::from(&requests_config),
         )));
     }
@@ -104,7 +151,7 @@ pub async fn run(
             if i == 0 {
                 count_channel_closed += 1;
             } else {
-                bar.inc();
+                process.inc();
             }
         }
         if count_channel_closed >= requests_config.connections {
@@ -121,22 +168,15 @@ pub async fn run(
     }
 
     result.total_time = now.elapsed();
+    result.combine_conn_summaries(&conn_summaries);
 
-    for r in conn_summaries {
-        result.total_requests += r.total_requests;
-        result.success_requests += r.success_requests;
-    }
-
-    result.success_rate = result.success_requests / result.total_requests;
-    result.requests_per_sec = (result.total_requests * 1000) / result.total_time.as_millis() as u64;
-
-    bar.finish();
+    process.finish();
     Ok(result)
 }
 
 async fn connection_task(
     client: impl Requester,
-    tx: tokio::sync::mpsc::Sender<u64>,
+    stats: impl TaskStats,
     conn_setting: ConnectionSettings,
 ) -> anyhow::Result<ConnectionSummary> {
     let mut summary = ConnectionSummary {
@@ -151,10 +191,10 @@ async fn connection_task(
             _ => summary.fail_requests += 1,
         }
         summary.total_requests += 1;
-        tx.send(1).await?;
+        stats.finish_one_request().await?;
     }
 
-    tx.send(0).await?;
+    stats.finish_all_requests().await?;
 
     Ok(summary)
 }
@@ -183,6 +223,18 @@ mod tests {
         }
     }
 
+    struct MockTaskNotifier {}
+
+    #[async_trait]
+    impl TaskStats for MockTaskNotifier {
+        async fn finish_one_request(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn finish_all_requests(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
     fn mock_conn_settings() -> ConnectionSettings {
         ConnectionSettings {
             requests: 10,
@@ -192,9 +244,13 @@ mod tests {
 
     #[tokio::test]
     async fn connection_task_success() {
-        let result = connection_task(MockHttpClient::with_status(Some(200)), mock_conn_settings())
-            .await
-            .expect("No error");
+        let result = connection_task(
+            MockHttpClient::with_status(Some(200)),
+            MockTaskNotifier {},
+            mock_conn_settings(),
+        )
+        .await
+        .expect("No error");
 
         assert_eq!(result.total_requests, 10);
         assert_eq!(result.success_requests, 10);
@@ -202,9 +258,13 @@ mod tests {
 
     #[tokio::test]
     async fn connection_task_fail() {
-        let result = connection_task(MockHttpClient::with_status(Some(500)), mock_conn_settings())
-            .await
-            .expect("No error");
+        let result = connection_task(
+            MockHttpClient::with_status(Some(500)),
+            MockTaskNotifier {},
+            mock_conn_settings(),
+        )
+        .await
+        .expect("No error");
 
         assert_eq!(result.total_requests, 10);
         assert_eq!(result.success_requests, 0);
@@ -212,7 +272,12 @@ mod tests {
 
     #[tokio::test]
     async fn connection_task_error() {
-        let result = connection_task(MockHttpClient::with_status(None), mock_conn_settings()).await;
+        let result = connection_task(
+            MockHttpClient::with_status(None),
+            MockTaskNotifier {},
+            mock_conn_settings(),
+        )
+        .await;
         assert!(result.is_err());
     }
 }
