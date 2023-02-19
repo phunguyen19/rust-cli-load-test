@@ -2,6 +2,7 @@ use std::ops::RangeInclusive;
 
 use benchmark::BenchmarkSettings;
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -42,6 +43,18 @@ fn connection_in_range(s: &str) -> Result<u16, String> {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    // let bar = ProgressBar::new(100);
+    // bar.set_style(
+    //     ProgressStyle::with_template("[{elapsed_precise}] {bar} {pos:>7}/{len:7} {msg}%")
+    //         .unwrap()
+    //         .progress_chars("##-"),
+    // );
+    // for _ in 0..100 {
+    //     bar.inc(1);
+    //     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    // }
+    // bar.finish();
 
     let result = benchmark::run(BenchmarkSettings {
         connections: args.connections,

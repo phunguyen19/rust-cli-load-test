@@ -77,14 +77,29 @@ pub async fn run(requests_config: BenchmarkSettings) -> anyhow::Result<Benchmark
         requests_per_sec: 0,
     };
 
+    let (tx, mut rx) = tokio::sync::mpsc::channel(requests_config.connections.into());
+
     let now = Instant::now();
 
     let mut conn_futures: Vec<_> = vec![];
     for _ in 0..requests_config.connections {
         conn_futures.push(tokio::spawn(connection_task(
             HttpClient::new(),
+            tx.clone(),
             ConnectionSettings::from(&requests_config),
         )));
+    }
+
+    let mut count_channel_closed = 0;
+    loop {
+        if let Some(i) = rx.recv().await {
+            if i == 0 {
+                count_channel_closed += 1;
+            }
+        }
+        if count_channel_closed >= requests_config.connections {
+            break;
+        }
     }
 
     let mut conn_summaries: Vec<ConnectionSummary> = Vec::with_capacity(conn_futures.len());
@@ -110,6 +125,7 @@ pub async fn run(requests_config: BenchmarkSettings) -> anyhow::Result<Benchmark
 
 async fn connection_task(
     client: impl Requester,
+    tx: tokio::sync::mpsc::Sender<u64>,
     conn_setting: ConnectionSettings,
 ) -> anyhow::Result<ConnectionSummary> {
     let mut summary = ConnectionSummary {
@@ -124,7 +140,10 @@ async fn connection_task(
             _ => summary.fail_requests += 1,
         }
         summary.total_requests += 1;
+        tx.send(1).await?;
     }
+
+    tx.send(0).await?;
 
     Ok(summary)
 }
