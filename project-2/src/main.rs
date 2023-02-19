@@ -89,7 +89,7 @@ mod test {
     }
 
     #[test]
-    fn test_connection_in_must_be_in_range() {
+    fn test_connection_must_be_in_range() {
         let mut a = [
             "cli_load_test",
             "-t",
