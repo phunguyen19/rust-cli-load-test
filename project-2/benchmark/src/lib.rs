@@ -69,7 +69,7 @@ pub fn build_uri(s: &String) -> Uri {
 }
 
 pub async fn run(requests_config: BenchmarkSettings) -> anyhow::Result<BenchmarkResult> {
-    let mut benchmark_result = BenchmarkResult {
+    let mut result = BenchmarkResult {
         total_requests: 0,
         total_time: Duration::new(0, 0),
         success_requests: 0,
@@ -95,19 +95,17 @@ pub async fn run(requests_config: BenchmarkSettings) -> anyhow::Result<Benchmark
         conn_summaries.push(conn_summary);
     }
 
-    benchmark_result.total_time = now.elapsed();
+    result.total_time = now.elapsed();
 
     for r in conn_summaries {
-        benchmark_result.total_requests += r.total_requests;
-        benchmark_result.success_requests += r.success_requests;
+        result.total_requests += r.total_requests;
+        result.success_requests += r.success_requests;
     }
 
-    benchmark_result.success_rate =
-        benchmark_result.success_requests / benchmark_result.total_requests;
-    benchmark_result.requests_per_sec =
-        (benchmark_result.total_requests * 1000) / benchmark_result.total_time.as_millis() as u64;
+    result.success_rate = result.success_requests / result.total_requests;
+    result.requests_per_sec = (result.total_requests * 1000) / result.total_time.as_millis() as u64;
 
-    Ok(benchmark_result)
+    Ok(result)
 }
 
 async fn connection_task(
