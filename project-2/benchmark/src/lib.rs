@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use hyper::{client::HttpConnector, Client, Uri};
 
 pub struct BenchmarkSettings {
-    pub connections: u64,
+    pub connections: u16,
     pub requests: u64,
     pub target_uri: Uri,
 }
@@ -58,7 +58,7 @@ struct ConnectionSettings {
 impl ConnectionSettings {
     fn from(value: &BenchmarkSettings) -> Self {
         Self {
-            requests: value.requests / value.connections,
+            requests: value.requests / value.connections as u64,
             target_uri: value.target_uri.clone(),
         }
     }

@@ -1,11 +1,13 @@
+use std::ops::RangeInclusive;
+
 use benchmark::BenchmarkSettings;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = 512)]
-    connections: u64,
+    #[arg(short, long, default_value_t = 512, value_parser = connection_in_range)]
+    connections: u16,
 
     #[arg(short, long, default_value_t = 100_000)]
     requests: u64,
@@ -15,6 +17,26 @@ struct Args {
 
     #[arg(short, long)]
     target_uri: String,
+}
+
+// THIS FUNCTIONS IS REFERENCED FROM AUTHOR
+// If client and server run on the same machine and both use the loopback interface,
+// We must allow at most 2**16 -1 (one for the server) connections, since each connection requires a port.
+// We stay away from the maximum by a margin of 10
+// We do not allow to run with zero commands
+
+const CONNECTION_RANGE: RangeInclusive<usize> = 1..=65536 - 10;
+fn connection_in_range(s: &str) -> Result<u16, String> {
+    s.parse()
+        .iter()
+        .filter(|i| CONNECTION_RANGE.contains(i))
+        .map(|i| *i as u16)
+        .next()
+        .ok_or(format!(
+            "Number of connection not in range {}-{}",
+            CONNECTION_RANGE.start(),
+            CONNECTION_RANGE.end()
+        ))
 }
 
 #[tokio::main]
@@ -36,23 +58,64 @@ async fn main() {
 
 #[cfg(test)]
 mod test {
-    // test connections
-    // be number
-    // greater than 0
-    // smaller than max u65
-    // is optional with default value
+    use super::*;
 
-    // test requests
-    // be number
-    // greater than 0
-    // smaller than max u65
-    // greater than connections
-    // is optional with default value
+    #[test]
+    fn test_works_with_default_argument() {
+        let args = Args::try_parse_from([
+            "cli_load_test",
+            "-t",
+            "http://localhost:8080/person",
+            "-o",
+            "test.text",
+        ])
+        .unwrap();
+        assert_eq!(args.connections, 512);
+        assert_eq!(args.requests, 100_000);
+        assert_eq!(args.target_uri, "http://localhost:8080/person");
+        assert_eq!(args.output_file, "test.text");
+    }
 
-    // test output file
-    // must be provided
+    #[test]
+    fn test_target_uri_must_be_provided() {
+        let result = Args::try_parse_from(["cli_load_test", "-o", "test.text"]);
+        assert!(result.is_err());
+    }
 
-    // test target uri
-    // must be provided
-    // must be valid url
+    #[test]
+    fn test_out_file_must_be_provided() {
+        let result = Args::try_parse_from(["cli_load_test", "-t", "http://localhost:8080/person"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_connection_in_must_be_in_range() {
+        let mut a = [
+            "cli_load_test",
+            "-t",
+            "http://localhost:8080/person",
+            "-o",
+            "test.text",
+            "-c",
+            "placeholder",
+        ];
+
+        assert!(Args::try_parse_from({
+            a[6] = "0";
+            a
+        })
+        .is_err());
+
+        assert!(Args::try_parse_from({
+            a[6] = "-1";
+            a
+        })
+        .is_err());
+
+        assert!(Args::try_parse_from({
+            a[6] = "65527"; // > 65536 - 10
+            a
+        })
+        .is_err());
+    }
 }
