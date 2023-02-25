@@ -45,11 +45,18 @@ impl BenchmarkResult {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct ConnectionSummary {
     total_requests: u64,
     success_requests: u64,
     fail_requests: u64,
+    request_summaries: Vec<RequestSummary>,
+}
+
+#[derive(Debug)]
+pub struct RequestSummary {
+    elapsed: u128,
+    status_code: u16,
 }
 
 #[async_trait]
@@ -183,14 +190,23 @@ async fn connection_task(
         success_requests: 0,
         total_requests: 0,
         fail_requests: 0,
+        request_summaries: vec![],
     };
 
     let mut queue_stats = 0;
     for _ in 0..conn_setting.requests {
-        match client.get(conn_setting.target_uri.clone()).await? {
+        let now = Instant::now();
+        let status_code = client.get(conn_setting.target_uri.clone()).await?;
+        match status_code {
             200 => summary.success_requests += 1,
             _ => summary.fail_requests += 1,
         }
+        let elapsed = now.elapsed().as_micros();
+        summary.request_summaries.push(RequestSummary {
+            elapsed,
+            status_code,
+        });
+
         summary.total_requests += 1;
 
         // send update stats
