@@ -16,28 +16,33 @@ pub struct BenchmarkSettings {
 
 #[derive(Debug)]
 pub struct BenchmarkResult {
-    total_requests: u64,
-    total_time: Duration,
-    success_requests: u64,
-    success_rate: u64,
-    requests_per_sec: u64,
+    pub target_uri: Uri,
+    pub total_requests: u64,
+    pub total_time: Duration,
+    pub success_requests: u64,
+    pub success_rate: u64,
+    pub requests_per_sec: u64,
+    pub request_summaries: Vec<RequestSummary>,
 }
 
 impl BenchmarkResult {
-    pub fn new() -> Self {
+    pub fn new(target_uri: Uri) -> Self {
         Self {
+            target_uri,
             total_requests: 0,
             total_time: Duration::new(0, 0),
             success_requests: 0,
             success_rate: 0,
             requests_per_sec: 0,
+            request_summaries: vec![],
         }
     }
 
-    pub fn combine_conn_summaries(&mut self, conn_summaries: &Vec<ConnectionSummary>) {
+    pub fn combine_conn_summaries(&mut self, conn_summaries: Vec<ConnectionSummary>) {
         for r in conn_summaries {
             self.total_requests += r.total_requests;
             self.success_requests += r.success_requests;
+            self.request_summaries.extend(r.request_summaries);
         }
 
         self.success_rate = self.success_requests / self.total_requests;
@@ -55,8 +60,8 @@ pub struct ConnectionSummary {
 
 #[derive(Debug)]
 pub struct RequestSummary {
-    elapsed: u128,
-    status_code: u16,
+    pub elapsed_micros: u128,
+    pub status_code: u16,
 }
 
 #[async_trait]
@@ -136,19 +141,19 @@ impl TaskNotifier {
 
 pub async fn run(
     process: impl BenchmarkStats,
-    requests_config: BenchmarkSettings,
+    benchmark_settings: BenchmarkSettings,
 ) -> anyhow::Result<BenchmarkResult> {
-    let mut result = BenchmarkResult::new();
-    let (tx, mut rx) = TaskNotifier::init_channel(requests_config.connections.into());
+    let mut result = BenchmarkResult::new(benchmark_settings.target_uri.clone());
+    let (tx, mut rx) = TaskNotifier::init_channel(benchmark_settings.connections.into());
 
     let now = Instant::now();
 
     let mut conn_futures: Vec<_> = vec![];
-    for _ in 0..requests_config.connections {
+    for _ in 0..benchmark_settings.connections {
         conn_futures.push(tokio::spawn(connection_task(
             HttpClient::new(),
             TaskNotifier { tx: tx.clone() },
-            ConnectionSettings::from(&requests_config),
+            ConnectionSettings::from(&benchmark_settings),
         )));
     }
 
@@ -161,7 +166,7 @@ pub async fn run(
             }
         }
 
-        if count_channel_closed >= requests_config.connections {
+        if count_channel_closed >= benchmark_settings.connections {
             break;
         }
     }
@@ -175,7 +180,7 @@ pub async fn run(
     }
 
     result.total_time = now.elapsed();
-    result.combine_conn_summaries(&conn_summaries);
+    result.combine_conn_summaries(conn_summaries);
 
     process.finish();
     Ok(result)
@@ -197,15 +202,14 @@ async fn connection_task(
     for _ in 0..conn_setting.requests {
         let now = Instant::now();
         let status_code = client.get(conn_setting.target_uri.clone()).await?;
+        summary.request_summaries.push(RequestSummary {
+            elapsed_micros: now.elapsed().as_micros(),
+            status_code,
+        });
         match status_code {
             200 => summary.success_requests += 1,
             _ => summary.fail_requests += 1,
         }
-        let elapsed = now.elapsed().as_micros();
-        summary.request_summaries.push(RequestSummary {
-            elapsed,
-            status_code,
-        });
 
         summary.total_requests += 1;
 
