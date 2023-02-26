@@ -60,7 +60,7 @@ pub struct ConnectionSummary {
 
 #[derive(Debug)]
 pub struct RequestSummary {
-    pub elapsed_micros: u128,
+    pub latency: Duration,
     pub status_code: u16,
 }
 
@@ -203,7 +203,7 @@ async fn connection_task(
         let now = Instant::now();
         let status_code = client.get(conn_setting.target_uri.clone()).await?;
         summary.request_summaries.push(RequestSummary {
-            elapsed_micros: now.elapsed().as_micros(),
+            latency: now.elapsed(),
             status_code,
         });
         match status_code {

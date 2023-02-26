@@ -101,6 +101,7 @@ async fn main() {
 #[derive(Debug, Tabled, Serialize)]
 struct StatusStatistics {
     status: u16,
+    requests: usize,
     #[tabled(display_with = "format_float")]
     min: f64,
     #[tabled(display_with = "format_float")]
@@ -121,11 +122,14 @@ fn format_float(num: &f64) -> String {
 
 fn process_result(summary: BenchmarkResult) -> Vec<StatusStatistics> {
     let mut status_latencies: HashMap<u16, Vec<f64>> = HashMap::new();
-    for s in summary.request_summaries {
-        if let Some(status_statistic) = status_latencies.get_mut(&s.status_code) {
-            status_statistic.push(s.elapsed_micros as f64);
+    for req_sum in summary.request_summaries {
+        if let Some(status_statistic) = status_latencies.get_mut(&req_sum.status_code) {
+            status_statistic.push(req_sum.latency.as_micros() as f64);
         } else {
-            status_latencies.insert(s.status_code, vec![s.elapsed_micros as f64]);
+            status_latencies.insert(
+                req_sum.status_code,
+                vec![req_sum.latency.as_micros() as f64],
+            );
         }
     }
 
@@ -148,6 +152,7 @@ fn calculate_statistic(status: &u16, latencies: &Vec<f64>) -> StatusStatistics {
     let p99 = data.percentile(99) / 1000f64;
     StatusStatistics {
         status: *status,
+        requests: latencies.len(),
         min,
         max,
         mean,
@@ -165,10 +170,13 @@ fn write_csv(path: String, records: Vec<StatusStatistics>) -> Result<(), Box<dyn
     let mut writer = Writer::from_writer(file);
 
     // Write the header row
-    writer.write_record(&["status", "min", "max", "mean", "std", "p90", "p99"])?;
+    writer.write_record(&[
+        "status", "requests", "min", "max", "mean", "std", "p90", "p99",
+    ])?;
     for x in records.iter() {
         writer.write_record(&[
             &x.status.to_string(),
+            &x.requests.to_string(),
             &x.min.to_string(),
             &x.max.to_string(),
             &x.mean.to_string(),
