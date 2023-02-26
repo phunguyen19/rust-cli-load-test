@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fs::File, ops::RangeInclusive};
+use std::{collections::HashMap, error::Error, fs::File, ops::RangeInclusive, time::Duration};
 
 use benchmark::{BenchmarkResult, BenchmarkSettings, BenchmarkStats};
 use clap::Parser;
@@ -103,6 +103,8 @@ struct StatusStatistics {
     status: u16,
     requests: usize,
     #[tabled(display_with = "format_float")]
+    average_rate: f64,
+    #[tabled(display_with = "format_float")]
     min: f64,
     #[tabled(display_with = "format_float")]
     max: f64,
@@ -123,42 +125,39 @@ fn format_float(num: &f64) -> String {
 fn process_result(summary: BenchmarkResult) -> Vec<StatusStatistics> {
     let mut status_latencies: HashMap<u16, Vec<f64>> = HashMap::new();
     for req_sum in summary.request_summaries {
+        let latency = req_sum.latency.as_micros() as f64 / 1000_f64;
         if let Some(status_statistic) = status_latencies.get_mut(&req_sum.status_code) {
-            status_statistic.push(req_sum.latency.as_micros() as f64);
+            status_statistic.push(latency);
         } else {
-            status_latencies.insert(
-                req_sum.status_code,
-                vec![req_sum.latency.as_micros() as f64],
-            );
+            status_latencies.insert(req_sum.status_code, vec![latency]);
         }
     }
 
     let mut statistics: Vec<StatusStatistics> = vec![];
     for (key, val) in status_latencies.iter() {
-        statistics.push(calculate_statistic(key, val));
+        statistics.push(calculate_statistic(key, val, summary.total_time));
     }
 
     statistics
 }
 
-fn calculate_statistic(status: &u16, latencies: &Vec<f64>) -> StatusStatistics {
-    let min = latencies.min() / 1000f64;
-    let max = latencies.max() / 1000f64;
-    let mean = latencies.mean() / 1000f64;
+fn calculate_statistic(
+    status: &u16,
+    latencies: &Vec<f64>,
+    total_time: Duration,
+) -> StatusStatistics {
     let variance = latencies.variance();
-    let std = variance.sqrt() / 1000f64;
     let mut data = statrs::statistics::Data::new(latencies.clone());
-    let p90 = data.percentile(90) / 1000f64;
-    let p99 = data.percentile(99) / 1000f64;
     StatusStatistics {
         status: *status,
         requests: latencies.len(),
-        min,
-        max,
-        mean,
-        std,
-        p90,
-        p99,
+        average_rate: latencies.len() as f64 * 1_000_000_f64 / total_time.as_micros() as f64,
+        min: latencies.min(),
+        max: latencies.max(),
+        mean: latencies.mean(),
+        std: variance.sqrt(),
+        p90: data.percentile(90),
+        p99: data.percentile(99),
     }
 }
 
@@ -171,7 +170,15 @@ fn write_csv(path: String, records: Vec<StatusStatistics>) -> Result<(), Box<dyn
 
     // Write the header row
     writer.write_record(&[
-        "status", "requests", "min", "max", "mean", "std", "p90", "p99",
+        "status",
+        "requests",
+        "average_rate",
+        "min",
+        "max",
+        "mean",
+        "std",
+        "p90",
+        "p99",
     ])?;
     for x in records.iter() {
         writer.write_record(&[

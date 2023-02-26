@@ -17,11 +17,7 @@ pub struct BenchmarkSettings {
 #[derive(Debug)]
 pub struct BenchmarkResult {
     pub target_uri: Uri,
-    pub total_requests: u64,
     pub total_time: Duration,
-    pub success_requests: u64,
-    pub success_rate: u64,
-    pub requests_per_sec: u64,
     pub request_summaries: Vec<RequestSummary>,
 }
 
@@ -29,24 +25,15 @@ impl BenchmarkResult {
     pub fn new(target_uri: Uri) -> Self {
         Self {
             target_uri,
-            total_requests: 0,
-            total_time: Duration::new(0, 0),
-            success_requests: 0,
-            success_rate: 0,
-            requests_per_sec: 0,
+            total_time: Duration::from_secs(0),
             request_summaries: vec![],
         }
     }
 
     pub fn combine_conn_summaries(&mut self, conn_summaries: Vec<ConnectionSummary>) {
         for r in conn_summaries {
-            self.total_requests += r.total_requests;
-            self.success_requests += r.success_requests;
             self.request_summaries.extend(r.request_summaries);
         }
-
-        self.success_rate = self.success_requests / self.total_requests;
-        self.requests_per_sec = (self.total_requests * 1000) / self.total_time.as_millis() as u64;
     }
 }
 
@@ -171,6 +158,8 @@ pub async fn run(
         }
     }
 
+    result.total_time = now.elapsed();
+
     let mut conn_summaries: Vec<ConnectionSummary> = Vec::with_capacity(conn_futures.len());
     for f in conn_futures {
         let conn_future_result = f.await;
@@ -179,7 +168,6 @@ pub async fn run(
         conn_summaries.push(conn_summary);
     }
 
-    result.total_time = now.elapsed();
     result.combine_conn_summaries(conn_summaries);
 
     process.finish();
@@ -217,7 +205,7 @@ async fn connection_task(
         // just send a batch instead
         // of send in every completed request
         queue_stats += 1;
-        if queue_stats >= 99 {
+        if queue_stats >= 199 {
             stats.update(queue_stats).await;
             queue_stats = 0;
         }
