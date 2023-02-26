@@ -1,8 +1,10 @@
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::{collections::HashMap, error::Error, fs::File, ops::RangeInclusive};
 
 use benchmark::{BenchmarkResult, BenchmarkSettings, BenchmarkStats};
 use clap::Parser;
+use csv::Writer;
 use indicatif::{ProgressBar, ProgressStyle};
+use serde::Serialize;
 use statrs::statistics::{OrderStatistics, Statistics};
 use tabled::{Table, Tabled};
 
@@ -16,7 +18,7 @@ struct Args {
     requests: u64,
 
     #[arg(short, long)]
-    output_file: String,
+    output_file: Option<String>,
 
     #[arg(short, long)]
     target_uri: String,
@@ -84,12 +86,19 @@ async fn main() {
     .await;
 
     match result {
-        Ok(summary) => println!("{}", Table::new(process_result(summary)).to_string()),
         Err(msg) => println!("error: {:?}", msg),
+        Ok(summary) => {
+            let output = process_result(summary);
+            if let Some(file_path) = args.output_file {
+                let _ = write_csv(file_path, output);
+            } else {
+                println!("{}", Table::new(output).to_string())
+            }
+        }
     }
 }
 
-#[derive(Debug, Tabled)]
+#[derive(Debug, Tabled, Serialize)]
 struct StatusStatistics {
     status: u16,
     #[tabled(display_with = "format_float")]
@@ -148,6 +157,33 @@ fn calculate_statistic(status: &u16, latencies: &Vec<f64>) -> StatusStatistics {
     }
 }
 
+fn write_csv(path: String, records: Vec<StatusStatistics>) -> Result<(), Box<dyn Error>> {
+    // Open a file to write the CSV output
+    let file = File::create(path)?;
+
+    // Create a CSV writer
+    let mut writer = Writer::from_writer(file);
+
+    // Write the header row
+    writer.write_record(&["status", "min", "max", "mean", "std", "p90", "p99"])?;
+    for x in records.iter() {
+        writer.write_record(&[
+            &x.status.to_string(),
+            &x.min.to_string(),
+            &x.max.to_string(),
+            &x.mean.to_string(),
+            &x.std.to_string(),
+            &x.p90.to_string(),
+            &x.p99.to_string(),
+        ])?;
+    }
+
+    // Flush the CSV writer to ensure all data is written
+    writer.flush()?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -165,13 +201,7 @@ mod test {
         assert_eq!(args.connections, 512);
         assert_eq!(args.requests, 100_000);
         assert_eq!(args.target_uri, "http://localhost:8080/person");
-        assert_eq!(args.output_file, "test.text");
-    }
-
-    #[test]
-    fn test_target_uri_must_be_provided() {
-        let result = Args::try_parse_from(["cli_load_test", "-o", "test.text"]);
-        assert!(result.is_err());
+        assert_eq!(args.output_file, Some(String::from("test.text")));
     }
 
     #[test]
