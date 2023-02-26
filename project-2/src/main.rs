@@ -1,8 +1,10 @@
-use std::{collections::HashMap, iter::Map, ops::RangeInclusive};
+use std::{collections::HashMap, ops::RangeInclusive};
 
 use benchmark::{BenchmarkResult, BenchmarkSettings, BenchmarkStats};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
+use statrs::statistics::{OrderStatistics, Statistics};
+use tabled::{Table, Tabled};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -70,6 +72,7 @@ impl Progress {
 async fn main() {
     let args = Args::parse();
     let progress = Progress::new(args.requests.into());
+    println!("Start benchmarking {}", &args.target_uri);
     let result = benchmark::run(
         progress,
         BenchmarkSettings {
@@ -81,80 +84,68 @@ async fn main() {
     .await;
 
     match result {
-        Ok(summary) => println!("{:?}", process_result(summary)),
+        Ok(summary) => println!("{}", Table::new(process_result(summary)).to_string()),
         Err(msg) => println!("error: {:?}", msg),
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Tabled)]
 struct StatusStatistics {
-    min_latency: u128,
-    max_latency: u128,
-    mean_latency: u128,
-    standard_deviation: u128,
-    p90: u128,
-    p99: u128,
-    latencies: Vec<u128>,
+    status: u16,
+    #[tabled(display_with = "format_float")]
+    min: f64,
+    #[tabled(display_with = "format_float")]
+    max: f64,
+    #[tabled(display_with = "format_float")]
+    mean: f64,
+    #[tabled(display_with = "format_float")]
+    std: f64,
+    #[tabled(display_with = "format_float")]
+    p90: f64,
+    #[tabled(display_with = "format_float")]
+    p99: f64,
 }
 
-impl StatusStatistics {
-    fn first_record(t: u128) -> Self {
-        Self {
-            min_latency: 0,
-            max_latency: 0,
-            mean_latency: 0,
-            standard_deviation: 0,
-            p90: 0,
-            p99: 0,
-            latencies: vec![t],
-        }
-    }
+fn format_float(num: &f64) -> String {
+    format!("{:.2}", num)
 }
 
-fn process_result(summary: BenchmarkResult) -> HashMap<u16, StatusStatistics> {
-    let mut statistics: HashMap<u16, StatusStatistics> = HashMap::new();
+fn process_result(summary: BenchmarkResult) -> Vec<StatusStatistics> {
+    let mut status_latencies: HashMap<u16, Vec<f64>> = HashMap::new();
     for s in summary.request_summaries {
-        if let Some(status_statistic) = statistics.get_mut(&s.status_code) {
-            status_statistic.latencies.push(s.elapsed_micros);
+        if let Some(status_statistic) = status_latencies.get_mut(&s.status_code) {
+            status_statistic.push(s.elapsed_micros as f64);
         } else {
-            statistics.insert(
-                s.status_code,
-                StatusStatistics::first_record(s.elapsed_micros),
-            );
+            status_latencies.insert(s.status_code, vec![s.elapsed_micros as f64]);
         }
     }
 
-    for (_, s) in statistics.iter_mut() {
-        s.min_latency = *s.latencies.iter().min().unwrap();
-        s.max_latency = *s.latencies.iter().max().unwrap();
-        s.mean_latency = s.latencies.iter().sum::<u128>() / s.latencies.len() as u128;
-        s.standard_deviation = calculate_standard_deviation(&s.latencies);
-
-        let mut sorted_measurements = s.latencies.clone();
-
-        sorted_measurements.sort();
-        s.p90 = sorted_measurements[(sorted_measurements.len() as f64 * 0.9).floor() as usize];
-        s.p99 = sorted_measurements[(sorted_measurements.len() as f64 * 0.99).floor() as usize];
+    let mut statistics: Vec<StatusStatistics> = vec![];
+    for (key, val) in status_latencies.iter() {
+        statistics.push(calculate_statistic(key, val));
     }
 
     statistics
 }
 
-fn calculate_standard_deviation(values: &Vec<u128>) -> u128 {
-    // Calculate the mean
-    let mean = values.iter().sum::<u128>() as f64 / values.len() as f64;
-
-    // Calculate the variance
-    let variance = values
-        .iter()
-        .map(|value| (*value as f64 - mean).powf(2.0))
-        .sum::<f64>()
-        / values.len() as f64;
-
-    // Take the square root of the variance to get the standard deviation
-    let standard_deviation = variance.sqrt() as u128;
-
-    standard_deviation
+fn calculate_statistic(status: &u16, latencies: &Vec<f64>) -> StatusStatistics {
+    let min = latencies.min() / 1000f64;
+    let max = latencies.max() / 1000f64;
+    let mean = latencies.mean() / 1000f64;
+    let variance = latencies.variance();
+    let std = variance.sqrt() / 1000f64;
+    let mut data = statrs::statistics::Data::new(latencies.clone());
+    let p90 = data.percentile(90) / 1000f64;
+    let p99 = data.percentile(99) / 1000f64;
+    StatusStatistics {
+        status: *status,
+        min,
+        max,
+        mean,
+        std,
+        p90,
+        p99,
+    }
 }
 
 #[cfg(test)]
